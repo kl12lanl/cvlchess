@@ -1,0 +1,206 @@
+import pygame
+import chess
+import random
+import time
+
+# Инициализация Pygame
+pygame.init()
+
+# Константы
+WIDTH, HEIGHT = 600, 700
+BOARD_SIZE = 600
+SQ_SIZE = BOARD_SIZE // 8
+FPS = 30
+
+# Цвета
+WHITE_SQ = (240, 217, 181)
+BLACK_SQ = (181, 136, 99)
+BG_COLOR = (45, 46, 42)
+TEXT_COLOR = (255, 255, 255)
+HIGHLIGHT_COLOR = (130, 151, 105, 150)
+POSSIBLE_MOVE_COLOR = (130, 151, 105, 80)
+
+# Цвета для самих фигур
+PIECE_WHITE = (255, 255, 255)
+PIECE_WHITE_OUTLINE = (0, 0, 0)
+PIECE_BLACK = (30, 30, 30)
+PIECE_BLACK_OUTLINE = (200, 200, 200)
+
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption("Chess AI - Саморисующийся")
+clock = pygame.time.Clock()
+font = pygame.font.SysFont("Helvetica", 24, bold=True)
+
+# --- ПРОГРАММНАЯ ОТРИСОВКА ВЕКТОРНЫХ ФИГУР ---
+def draw_vector_piece(screen, piece_type, color, x, y):
+    """Сама рисует уникальные геометрические силуэты для каждой фигуры"""
+    main_color = PIECE_WHITE if color == chess.WHITE else PIECE_BLACK
+    line_color = PIECE_WHITE_OUTLINE if color == chess.WHITE else PIECE_BLACK_OUTLINE
+    lw = 2 # Ширина обводки
+    
+    cx, cy = x + SQ_SIZE // 2, y + SQ_SIZE // 2 # Центр клетки
+    r = SQ_SIZE // 2
+    
+    # Базовая подставка для всех фигур
+    pygame.draw.ellipse(screen, main_color, (x + 15, y + SQ_SIZE - 15, SQ_SIZE - 30, 10))
+    pygame.draw.ellipse(screen, line_color, (x + 15, y + SQ_SIZE - 15, SQ_SIZE - 30, 10), lw)
+
+    if piece_type == chess.PAWN: # Пешка: Круг на ножке
+        pygame.draw.rect(screen, main_color, (cx - 6, cy, 12, 20))
+        pygame.draw.rect(screen, line_color, (cx - 6, cy, 12, 20), lw)
+        pygame.draw.circle(screen, main_color, (cx, cy - 8), 12)
+        pygame.draw.circle(screen, line_color, (cx, cy - 8), 12, lw)
+        
+    elif piece_type == chess.KNIGHT: # Конь: L-образный силуэт с ухом
+        pts = [(cx-15, cy+15), (cx-15, cy-10), (cx-5, cy-20), (cx+15, cy-15), (cx+10, cy), (cx+15, cy+15)]
+        pygame.draw.polygon(screen, main_color, pts)
+        pygame.draw.polygon(screen, line_color, pts, lw)
+        pygame.draw.circle(screen, line_color, (cx - 5, cy - 10), 2) # Глаз
+        
+    elif piece_type == chess.BISHOP: # Слон: Овал с крестиком
+        pygame.draw.ellipse(screen, main_color, (cx - 12, cy - 20, 24, 35))
+        pygame.draw.ellipse(screen, line_color, (cx - 12, cy - 20, 24, 35), lw)
+        pygame.draw.circle(screen, main_color, (cx, cy - 22), 4) # Пипка сверху
+        pygame.draw.circle(screen, line_color, (cx, cy - 22), 4, lw)
+        
+    elif piece_type == chess.ROOK: # Ладья: Замок / Крепость
+        pygame.draw.rect(screen, main_color, (cx - 15, cy - 15, 30, 30))
+        pygame.draw.rect(screen, line_color, (cx - 15, cy - 15, 30, 30), lw)
+        # Зубцы ладьи
+        pygame.draw.rect(screen, BG_COLOR, (cx - 15, cy - 17, 7, 6))
+        pygame.draw.rect(screen, BG_COLOR, (cx + 8, cy - 17, 7, 6))
+        
+    elif piece_type == chess.QUEEN: # Ферзь: Корона с точками
+        pts = [(cx-18, cy+15), (cx-20, cy-10), (cx-8, cy+2), (cx, cy-18), (cx+8, cy+2), (cx+20, cy-10), (cx+18, cy+15)]
+        pygame.draw.polygon(screen, main_color, pts)
+        pygame.draw.polygon(screen, line_color, pts, lw)
+        
+    elif piece_type == chess.KING: # Король: Большая корона с выраженным крестом
+        pygame.draw.rect(screen, main_color, (cx - 16, cy - 12, 32, 28))
+        pygame.draw.rect(screen, line_color, (cx - 16, cy - 12, 32, 28), lw)
+        # Крест
+        pygame.draw.line(screen, line_color, (cx, cy - 22), (cx, cy - 12), lw + 1)
+        pygame.draw.line(screen, line_color, (cx - 5, cy - 17), (cx + 5, cy - 17), lw + 1)
+
+def draw_pieces(screen, board):
+    """Перебирает клетки и вызывает отрисовку векторных фигур"""
+    for r in range(8):
+        for c in range(8):
+            square = chess.square(c, 7 - r)
+            piece = board.piece_at(square)
+            if piece:
+                draw_vector_piece(screen, piece.piece_type, piece.color, c * SQ_SIZE, r * SQ_SIZE)
+
+# --- ИСКУССТВЕННЫЙ ИНТЕЛЛЕКТ (Минимакс) ---
+PIECE_VALUES = {chess.PAWN: 10, chess.KNIGHT: 30, chess.BISHOP: 30, chess.ROOK: 50, chess.QUEEN: 90, chess.KING: 900}
+
+# Таблицы позиционной силы
+pawn_table = [[0,0,0,0,0,0,0,0],[5,5,5,5,5,5,5,5],[1,1,2,3,3,2,1,1],[0.5,0.5,1,2.5,2.5,1,0.5,0.5],[0,0,0,2,2,0,0,0],[0.5,-0.5,-1,0,0,-1,-0.5,0.5],[0.5,1,1,-2,-2,1,1,0.5],[0,0,0,0,0,0,0,0]]
+knight_table = [[-5,-4,-3,-3,-3,-3,-4,-5],[-4,-2,0,0,0,0,-2,-4],[-3,0,1,1.5,1.5,1,0,-3],[-3,0.5,1.5,2,2,1.5,0.5,-3],[-3,0,1.5,2,2,1.5,0,-3],[-3,0.5,1,1.5,1.5,1,0.5,-3],[-4,-2,0,0.5,0.5,0,-2,-4],[-5,-4,-3,-3,-3,-3,-4,-5]]
+bishop_table = [[-2,-1,-1,-1,-1,-1,-1,-2],[-1,0,0,0,0,0,0,-1],[-1,0,0.5,1,1,0.5,0,-1],[-1,0.5,0.5,1,1,0.5,0.5,-1],[-1,0,1,1,1,1,0,-1],[-1,1,1,1,1,1,1,-1],[-1,0.5,0,0,0,0,0.5,-1],[-2,-1,-1,-1,-1,-1,-1,-2]]
+rook_table = [[0,0,0,0,0,0,0,0],[0.5,1,1,1,1,1,1,0.5],[-0.5,0,0,0,0,0,0,-0.5],[-0.5,0,0,0,0,0,0,-0.5],[-0.5,0,0,0,0,0,0,-0.5],[-0.5,0,0,0,0,0,0,-0.5],[-0.5,0,0,0,0,0,0,-0.5],[0,0,0,0.5,0.5,0,0,0]]
+queen_table = [[-2,-1,-1,-0.5,-0.5,-1,-1,-2],[-1,0,0,0,0,0,0,-1],[-1,0,0.5,0.5,0.5,0.5,0,-1],[-0.5,0,0.5,0.5,0.5,0.5,0,-0.5],[0,0,0.5,0.5,0.5,0.5,0,-0.5],[-1,0.5,0.5,0.5,0.5,0.5,0,-1],[-1,0,0.5,0,0,0,0,-1],[-2,-1,-1,-0.5,-0.5,-1,-1,-2]]
+king_table = [[-3,-4,-4,-5,-5,-4,-4,-3],[-3,-4,-4,-5,-5,-4,-4,-3],[-3,-4,-4,-5,-5,-4,-4,-3],[-3,-4,-4,-5,-5,-4,-4,-3],[-2,-3,-3,-4,-4,-3,-3,-2],[-1,-2,-2,-2,-2,-2,-2,-1],[2,2,0,0,0,0,2,2],[2,3,1,0,0,1,3,2]]
+
+def evaluate_board(board):
+    if board.is_checkmate(): return -9999 if board.turn == chess.WHITE else 9999
+    if board.is_stalemate() or board.is_insufficient_material(): return 0
+    score = 0
+    for square in chess.SQUARES:
+        piece = board.piece_at(square)
+        if not piece: continue
+        val = PIECE_VALUES[piece.piece_type]
+        r, c = chess.square_rank(square), chess.square_file(square)
+        row_idx = 7 - r if piece.color == chess.WHITE else r
+        bonus = 0
+        if piece.piece_type == chess.PAWN: bonus = pawn_table[row_idx][c]
+        elif piece.piece_type == chess.KNIGHT: bonus = knight_table[row_idx][c]
+        elif piece.piece_type == chess.BISHOP: bonus = bishop_table[row_idx][c]
+        elif piece.piece_type == chess.ROOK: bonus = rook_table[row_idx][c]
+        elif piece.piece_type == chess.QUEEN: bonus = queen_table[row_idx][c]
+        elif piece.piece_type == chess.KING: bonus = king_table[row_idx][c]
+        if piece.color == chess.WHITE: score += (val + bonus)
+        else: score -= (val + bonus)
+    return score
+
+def minimax(board, depth, alpha, beta, is_maximizing):
+    if depth == 0 or board.is_game_over(): return evaluate_board(board), None
+    legal_moves = list(board.legal_moves)
+    legal_moves.sort(key=lambda m: board.is_capture(m), reverse=True)
+    best_move = None
+    if is_maximizing:
+        max_eval = -float('inf')
+        for move in legal_moves:
+            board.push(move)
+            evaluation, _ = minimax(board, depth - 1, alpha, beta, False)
+            board.board_pop = board.pop()
+            if evaluation > max_eval: max_eval, best_move = evaluation, move
+            alpha = max(alpha, evaluation)
+            if beta <= alpha: break
+        return max_eval, best_move
+    else:
+        min_eval = float('inf')
+        for move in legal_moves:
+            board.push(move)
+            evaluation, _ = minimax(board, depth - 1, alpha, beta, True)
+            board.board_pop = board.pop()
+            if evaluation < min_eval: min_eval, best_move = evaluation, move
+            beta = min(beta, evaluation)
+            if beta <= alpha: break
+        return min_eval, best_move
+
+def get_strong_ai_move(board):
+    _, move = minimax(board, depth=3, alpha=-float('inf'), beta=float('inf'), is_maximizing=False)
+    return move if move else random.choice(list(board.legal_moves))
+
+# --- ОСНОВНОЙ ИНТЕРФЕЙС ---
+def draw_board(screen):
+    for r in range(8):
+        for c in range(8):
+            color = WHITE_SQ if (r + c) % 2 == 0 else BLACK_SQ
+            pygame.draw.rect(screen, color, pygame.Rect(c * SQ_SIZE, r * SQ_SIZE, SQ_SIZE, SQ_SIZE))
+
+def draw_highlights(screen, board, selected_square):
+    if selected_square is not None:
+        c, r = chess.square_file(selected_square), 7 - chess.square_rank(selected_square)
+        s = pygame.Surface((SQ_SIZE, SQ_SIZE), pygame.SRCALPHA)
+        s.fill(HIGHLIGHT_COLOR)
+        screen.blit(s, (c * SQ_SIZE, r * SQ_SIZE))
+        for move in board.legal_moves:
+            if move.from_square == selected_square:
+                tc, tr = chess.square_file(move.to_square), 7 - chess.square_rank(move.to_square)
+                surf = pygame.Surface((SQ_SIZE, SQ_SIZE), pygame.SRCALPHA)
+                pygame.draw.circle(surf, POSSIBLE_MOVE_COLOR, (SQ_SIZE // 2, SQ_SIZE // 2), SQ_SIZE // 5)
+                screen.blit(surf, (tc * SQ_SIZE, tr * SQ_SIZE))
+
+def draw_ui(screen, white_time, black_time):
+    pygame.draw.rect(screen, BG_COLOR, pygame.Rect(0, BOARD_SIZE, WIDTH, HEIGHT - BOARD_SIZE))
+    w_min, w_sec = divmod(int(white_time), 60)
+    b_min, b_sec = divmod(int(black_time), 60)
+    w_txt = font.render(f"Игрок (Белые): {w_min:02d}:{w_sec:02d}", True, TEXT_COLOR)
+    b_txt = font.render(f"ИИ (Черные): {b_min:02d}:{b_sec:02d}", True, TEXT_COLOR)
+    screen.blit(w_txt, (30, BOARD_SIZE + 35))
+    screen.blit(b_txt, (370, BOARD_SIZE + 35))
+
+def main():
+    board = chess.Board()
+    running = True
+    selected_square = None
+    white_time, black_time = 300.0, 300.0
+    last_time = time.time()
+
+    while running:
+        dt = time.time() - last_time
+        last_time = time.time()
+        
+        if not board.is_game_over():
+            if board.turn == chess.WHITE: white_time -= dt
+            else: black_time -= dt
+
+        if white_time <= 0 or black_time <= 0: running = False
+
+        if board.turn == chess.BLACK and not board.is_game_over():
+            board.push(get_strong_ai_move(board))
+            last_time = time.time()
+
+        for event in pygame.event.get():
