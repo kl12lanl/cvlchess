@@ -30,6 +30,7 @@ screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Chess AI - Саморисующийся")
 clock = pygame.time.Clock()
 font = pygame.font.SysFont("Helvetica", 24, bold=True)
+end_font = pygame.font.SysFont("Helvetica", 48, bold=True)
 
 # --- ПРОГРАММНАЯ ОТРИСОВКА ВЕКТОРНЫХ ФИГУР ---
 def draw_vector_piece(screen, piece_type, color, x, y):
@@ -39,7 +40,6 @@ def draw_vector_piece(screen, piece_type, color, x, y):
     lw = 2 # Ширина обводки
     
     cx, cy = x + SQ_SIZE // 2, y + SQ_SIZE // 2 # Центр клетки
-    r = SQ_SIZE // 2
     
     # Базовая подставка для всех фигур
     pygame.draw.ellipse(screen, main_color, (x + 15, y + SQ_SIZE - 15, SQ_SIZE - 30, 10))
@@ -67,8 +67,8 @@ def draw_vector_piece(screen, piece_type, color, x, y):
         pygame.draw.rect(screen, main_color, (cx - 15, cy - 15, 30, 30))
         pygame.draw.rect(screen, line_color, (cx - 15, cy - 15, 30, 30), lw)
         # Зубцы ладьи
-        pygame.draw.rect(screen, BG_COLOR, (cx - 15, cy - 17, 7, 6))
-        pygame.draw.rect(screen, BG_COLOR, (cx + 8, cy - 17, 7, 6))
+        pygame.draw.rect(screen, BLACK_SQ, (cx - 15, cy - 17, 7, 6))
+        pygame.draw.rect(screen, BLACK_SQ, (cx + 8, cy - 17, 7, 6))
         
     elif piece_type == chess.QUEEN: # Ферзь: Корона с точками
         pts = [(cx-18, cy+15), (cx-20, cy-10), (cx-8, cy+2), (cx, cy-18), (cx+8, cy+2), (cx+20, cy-10), (cx+18, cy+15)]
@@ -133,7 +133,7 @@ def minimax(board, depth, alpha, beta, is_maximizing):
         for move in legal_moves:
             board.push(move)
             evaluation, _ = minimax(board, depth - 1, alpha, beta, False)
-            board.board_pop = board.pop()
+            board.pop()  # Исправлено: просто pop()
             if evaluation > max_eval: max_eval, best_move = evaluation, move
             alpha = max(alpha, evaluation)
             if beta <= alpha: break
@@ -143,7 +143,7 @@ def minimax(board, depth, alpha, beta, is_maximizing):
         for move in legal_moves:
             board.push(move)
             evaluation, _ = minimax(board, depth - 1, alpha, beta, True)
-            board.board_pop = board.pop()
+            board.pop()  # Исправлено: просто pop()
             if evaluation < min_eval: min_eval, best_move = evaluation, move
             beta = min(beta, evaluation)
             if beta <= alpha: break
@@ -153,7 +153,7 @@ def get_strong_ai_move(board):
     _, move = minimax(board, depth=3, alpha=-float('inf'), beta=float('inf'), is_maximizing=False)
     return move if move else random.choice(list(board.legal_moves))
 
-# --- ОСНОВНОЙ ИНТЕРФЕЙС ---
+# --- ИНТЕРФЕЙС И ОТРИСОВКА ---
 def draw_board(screen):
     for r in range(8):
         for c in range(8):
@@ -180,27 +180,22 @@ def draw_ui(screen, white_time, black_time):
     w_txt = font.render(f"Игрок (Белые): {w_min:02d}:{w_sec:02d}", True, TEXT_COLOR)
     b_txt = font.render(f"ИИ (Черные): {b_min:02d}:{b_sec:02d}", True, TEXT_COLOR)
     screen.blit(w_txt, (30, BOARD_SIZE + 35))
-    screen.blit(b_txt, (370, BOARD_SIZE + 35))
+    screen.blit(b_txt, (350, BOARD_SIZE + 35))
 
+def draw_game_over(screen, message):
+    """Рисует полупрозрачное окно завершения игры"""
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 180)) # Затемнение экрана
+    screen.blit(overlay, (0, 0))
+    
+    txt_surf = end_font.render(message, True, (255, 215, 0)) # Золотой цвет текста
+    txt_rect = txt_surf.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+    screen.blit(txt_surf, txt_rect)
+
+# --- ГЛАВНЫЙ ИГРОВОЙ ЦИКЛ ---
 def main():
     board = chess.Board()
     running = True
+    game_over = False
+    end_message = ""
     selected_square = None
-    white_time, black_time = 300.0, 300.0
-    last_time = time.time()
-
-    while running:
-        dt = time.time() - last_time
-        last_time = time.time()
-        
-        if not board.is_game_over():
-            if board.turn == chess.WHITE: white_time -= dt
-            else: black_time -= dt
-
-        if white_time <= 0 or black_time <= 0: running = False
-
-        if board.turn == chess.BLACK and not board.is_game_over():
-            board.push(get_strong_ai_move(board))
-            last_time = time.time()
-
-        for event in pygame.event.get():
